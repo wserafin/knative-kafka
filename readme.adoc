@@ -2,13 +2,10 @@
 
 == Prerequisites
 
-Assumes you have used try.openshift.com to create an OCP 4.2 cluster.  Here is a quick video that illustrates that process.
-
+Assumes you have used try.openshift.com to create an OCP 4.4 cluster.  
 https://youtu.be/sK2SWH_m01Y
 
 CLI tools used:
-
-* kubectl
 * oc
 * jq
 * kafkacat
@@ -31,43 +28,26 @@ image::images/operatorhub_ui.png[OperatorHub inside of OpenShift Console]
 image::images/installed_operators.png[Installed Operators]
 
 
-You can check on your installed operators and their versions: 
+You can check on your installed operators and their versions:
+Installing operators require cluste-admin role.
+
+Install Serverless Operator -  https://docs.openshift.com/container-platform/4.4/serverless/installing_serverless/installing-openshift-serverless.html
+Install AMQ Operator - https://access.redhat.com/documentation/en-us/red_hat_amq/7.5/html/using_amq_streams_on_openshift/getting-started-str#deploying-cluster-operator-to-watch-whole-cluster-str
 
 ----
-kubectl get csv
-NAME                               DISPLAY                         VERSION   REPLACES                           PHASE
-knative-eventing-operator.v0.7.1   Knative Eventing Operator       0.7.1     knative-eventing-operator.v0.6.0   Succeeded
-knative-kafka-operator.v0.7.1      Knative Apache Kafka Operator   0.7.1     knative-kafka-operator.v0.6.0      Succeeded
-knative-serving-operator.v0.7.1    Knative Serving Operator        0.7.1     knative-serving-operator.v0.6.0    Succeeded
-strimzi-cluster-operator.v0.13.0   Strimzi Apache Kafka Operator   0.13.0    strimzi-cluster-operator.v0.12.2   Succeeded
+oc get csv
+NAME                         DISPLAY                             VERSION   REPLACES   PHASE
+amqstreams.v1.5.0            Red Hat Integration - AMQ Streams   1.5.0                Succeeded
+serverless-operator.v1.7.1   OpenShift Serverless Operator       1.7.1                Succeeded
 ----
 
-NOTE: I have also used the following versions - OpenShift Serverless pulls in ElasticSearch, Jaeger, Kiali
-----
-kubectl get csv
-NAME                                        DISPLAY                          VERSION              REPLACES                            PHASE
-elasticsearch-operator.4.3.1-202002032140   Elasticsearch Operator           4.3.1-202002032140                                       Succeeded
-jaeger-operator.v1.13.1                     Jaeger Operator                  1.13.1                                                   Succeeded
-kiali-operator.v1.0.9                       Kiali Operator                   1.0.9                kiali-operator.v1.0.8               Succeeded
-knative-eventing-operator.v0.12.0           Knative Eventing Operator        0.12.0               knative-eventing-operator.v0.11.0   Succeeded
-knative-kafka-operator.v0.12.1              Knative Apache Kafka Operator    0.12.1               knative-kafka-operator.v0.11.2      Succeeded
-serverless-operator.v1.4.1                  OpenShift Serverless Operator    1.4.1                serverless-operator.v1.4.0          Succeeded
-servicemeshoperator.v1.0.7                  Red Hat OpenShift Service Mesh   1.0.7                servicemeshoperator.v1.0.6          Succeeded
-strimzi-cluster-operator.v0.15.0            Strimzi                          0.15.0               strimzi-cluster-operator.v0.14.0    Succeeded
-----
 
 == Namespace/Project Setup
 [source,bash]
 ----
-kubectl create namespace demo
+oc create project demo
 
-# make it "sticky"
-kubectl config set-context --current --namespace=demo
-
-# check that it is set
-kubectl config current-context
-
-# or use "oc" to see what the "sticky" namespace is
+# use "oc" to see what the "sticky" namespace is
 oc project
 ----
 
@@ -75,13 +55,14 @@ oc project
 == Create kafka cluster
 [source,bash]
 ----
-cat <<EOF | kubectl apply -f -
+cat <<EOF | oc apply -f -
 apiVersion: kafka.strimzi.io/v1beta1
 kind: Kafka
 metadata:
   name: my-cluster
 spec:
-  kafka:    
+  kafka:   
+    version: 2.5.0
     replicas: 3
     listeners:
       plain: {}
@@ -90,21 +71,22 @@ spec:
         type: loadbalancer
         tls: false      
     config:
-      offsets.topic.replication.factor: 1
-      transaction.state.log.replication.factor: 1
-      transaction.state.log.min.isr: 1
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+      log.message.format.version: '2.5'
     storage:
       type: jbod
       volumes:
       - id: 0
         type: persistent-claim
-        size: 100Gi
+        size: 60Gi
         deleteClaim: true
   zookeeper:
     replicas: 3
     storage:
       type: persistent-claim
-      size: 100Gi
+      size: 60Gi
       deleteClaim: true
   entityOperator:
     topicOperator: {}
@@ -118,9 +100,9 @@ EOF
 Note: this only needs to be done one time
 [source,bash]
 ----
-cat <<EOF | kubectl apply -n knative-eventing -f -
-apiVersion: eventing.knative.dev/v1alpha1
-kind: KnativeEventingKafka
+cat <<EOF | oc apply -n knative-eventing -f -
+apiVersion: operator.knative.dev/v1alpha1
+kind: KnativeEventing
 metadata:
   name: knative-eventing-kafka
   namespace: knative-eventing
@@ -135,7 +117,7 @@ Verify the KnativeEventingKafka took affect
 
 [source,bash]
 ----
-kubectl get crds | grep kafkasource
+oc get crds | grep kafkasource
 kafkasources.sources.eventing.knative.dev                   2019-09-21T14:23:14Z
 ----
 
@@ -144,7 +126,7 @@ and
 [source,bash]
 ----
 
-kubectl get pods -n knative-eventing
+oc get pods -n knative-eventing
 
 NAME                                            READY   STATUS              RESTARTS   AGE
 eventing-controller-758d785bf7-wzq7v            1/1     Running             0          18m
@@ -195,7 +177,7 @@ OR
 
 [source,bash]
 ----
-kubectl exec -it -c kafka my-cluster-kafka-0 -- bin/kafka-topics.sh --zookeeper localhost:2181 --describe --topic my-topic
+oc exec -it -c kafka my-cluster-kafka-0 -- bin/kafka-topics.sh --zookeeper localhost:2181 --describe --topic my-topic
 
 OpenJDK 64-Bit Server VM warning: If the number of processors is expected to increase from one, then you should configure the number of parallel GC threads appropriately using -XX:ParallelGCThreads=N
 Topic:my-topic	PartitionCount:100	ReplicationFactor:1	Configs:message.format.version=2.3-IV1
@@ -212,46 +194,47 @@ Topic:my-topic	PartitionCount:100	ReplicationFactor:1	Configs:message.format.ver
 ----
 
 
-== Test connectivity to the kafka my-topic
+===Deploy Knative Kafka Source 
 
-[source,bash]
 ----
-# AWS
-export BOOTSTRAP_IP=$(kubectl get services my-cluster-kafka-external-bootstrap -ojson | jq -r .status.loadBalancer.ingress[].hostname)
-
-#Azure
-export BOOTSTRAP_IP=$(kubectl get services my-cluster-kafka-external-bootstrap -ojson | jq -r .status.loadBalancer.ingress[].ip)
-
-export BOOTSTRAP_PORT=$(kubectl get services my-cluster-kafka-external-bootstrap -ojson | jq -r .spec.ports[].port)
-
-export BOOTSTRAP_URL=$BOOTSTRAP_IP:$BOOTSTRAP_PORT
+oc apply \
+-f https://github.com/knative/eventing-contrib/\
+releases/download/v0.12.2/kafka-source.yaml
 ----
+The previous step deploys the Knative KafkaSource in the knative-sources namespace
+as well as a CRD, ServiceAccount, ClusterRole, etc. Verify that the Knative
+Source namespace includes the kafka-controller-manager-0 pod:
 
-
-Then use Kafkacat to produce/consume messages
-[source,bash]
 ----
-kafkacat -P -b $BOOTSTRAP_URL -t my-topic
-one
-two
-three
+oc get pods -n knative-sources
+NAME READY STATUS AGE
+kafka-controller-manager-0 1/1 Running 1m17s
+
 ----
 
-ctrl-z to end
+=== Deploy Kafka Channel
 
-[source,bash]
 ----
-kafkacat -C -b $BOOTSTRAP_URL -t my-topic 
-one
-% Reached end of topic my-topic [35] at offset 1
-two
-% Reached end of topic my-topic [81] at offset 1
-three
-% Reached end of topic my-topic [32] at offset 1
+$ curl -L "https://github.com/knative/eventing-contrib/\
+releases/download/v0.12.2/kafka-channel.yaml" \
+| sed 's/REPLACE_WITH_CLUSTER_URL/my-cluster-kafka-bootstrap.demo.svc.cluster.local:9092 /
+| oc apply --filename -
+ 
 ----
 
-ctrl-c to end 
-
+Look for 3 pods with Kafka prefixto verify 
+----
+$ oc get pods -n knative-eventing
+NAME READY STATUS AGE
+eventing-controller-666b79d867-kq8cc 1/1 Running 64m
+eventing-webhook-5867c98d9b-hzctw 1/1 Running 64m
+imc-controller-7c4f9945d7-s59xd 1/1 Running 64m
+imc-dispatcher-7b55b86649-nsjm2 1/1 Running 64m
+kafka-ch-controller-7c596b6b55-fzxcx 1/1 Running 33s
+kafka-ch-dispatcher-577958f994-4f2qs 1/1 Running 33s
+kafka-webhook-74bbd99f5c-c84ls 1/1 Running 33s
+sources-controller-694f8df9c4-pss2w 1/1 Running 64m
+----
 == Deploy a Knative Service
 
 This is your "sink" that receives events
@@ -309,7 +292,7 @@ metadata:
   name: mykafka-source
 spec:
   consumerGroup: knative-group
-  bootstrapServers: 52.185.212.83:9094 # <1>
+  bootstrapServers: my-cluster-kafka-bootstrap:9092
   topics: my-topic
   sink:
     apiVersion: serving.knative.dev/v1alpha1
@@ -318,44 +301,18 @@ spec:
 EOF
 ----
 
-<1> "bootstrapServers: 52.185.212.83:9094" comes from
 
+
+=== Test it with embeded producer
+
+---
+oc rsh --container kafka my-cluster-kafka-0
+bin/kafka-console-producer.sh --broker-list localhost:9092 --topic test-topic
+---
+
+When prompot > comes up type 
 ----
-# AWS
-kubectl get services my-cluster-kafka-external-bootstrap -ojson | jq -r .status.loadBalancer.ingress[0].hostname
-#OR
-#Azure
-kubectl get services my-cluster-kafka-external-bootstrap -ojson | jq -r .status.loadBalancer.ingress[0].ip
-
-# and
-kubectl get services my-cluster-kafka-external-bootstrap -ojson | jq -r .spec.ports[].port
-----
-
-You can monitor the logs of mmyknativesink-source to see if it has connectivity issues
-
-----
-stern mykafka-source
-----
-
-== Test
-
-Now push some messages in, must be in JSON format 
-
-----
-
-kafkacat -P -b $BOOTSTRAP_URL -t my-topic
-{"hello":"world"}
-----
-
-and you should see some logging output
-
-[source,bash]
-----
-kubectl logs -l serving.knative.dev/configuration=myknativesink -c user-container
-# or
-kail -l serving.knative.dev/configuration=myknativesink -c user-container
-# or
-stern myknativesink
+>{hello:world}
 ----
 
 ----
