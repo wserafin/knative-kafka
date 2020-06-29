@@ -16,10 +16,8 @@ CLI tools used:
 
 Using the OCP 4.x Administration Console - find OperatorHub and install
 
-. Knative Serving
-. Knative Eventing
-. Knative Kafka
-. Strimzi 
+. Serveless
+. AMQ Streams
 
 
 image::images/operatorhub_ui.png[OperatorHub inside of OpenShift Console]
